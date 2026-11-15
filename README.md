@@ -5,7 +5,13 @@ Le jeu se compose d'une mission complète d'environ 8 à 12 minutes, jouée avec
 coéquipiers IA et trois points de contrôle. Le décor et les armes sont générés par le
 code ; les personnages et une partie des sons viennent de packs CC0 (voir Crédits).
 
-## Lancer le jeu
+## Télécharger la version Windows
+
+**[operation-aube-windows.zip](https://github.com/InfoDiderot/operation-aube/raw/builds/operation-aube-windows.zip)**
+(branche `builds`). Décompressez le zip, puis lancez `OperationAube.exe`. Si SmartScreen
+bloque l'exécutable (non signé) : **Informations complémentaires** → **Exécuter quand même**.
+
+## Lancer le jeu depuis les sources
 
 1. Installez [Godot 4.7](https://godotengine.org/download), version standard (pas la
    version .NET).

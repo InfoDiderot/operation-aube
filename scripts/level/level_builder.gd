@@ -255,7 +255,11 @@ func hedge(a: Vector3, b: Vector3, gaps: Array = [], h := 2.4) -> void:
 			continue
 		var mid := a + dir * (s0 + s1) * 0.5
 		# Noyau (collision + masque de vue), recouvert de buissons
-		box(mid + Vector3.UP * (h - 0.3) * 0.5, Vector3(1.3, h - 0.3, s1 - s0), Color(0.12, 0.2, 0.07), yaw)
+		var core := box(mid + Vector3.UP * (h - 0.3) * 0.5, Vector3(1.3, h - 0.3, s1 - s0), Color(0.15, 0.24, 0.09), yaw)
+		# Collision pleine hauteur, mais le noyau visible reste sous la cime des buissons
+		var core_mesh := core.get_child(core.get_child_count() - 1) as Node3D
+		core_mesh.scale = Vector3(0.8, 0.62, 1.0)
+		core_mesh.position.y = -(h - 0.3) * 0.19
 		var t := s0 + 0.6
 		var k := 0
 		while t < s1 - 0.4:

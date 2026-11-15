@@ -16,19 +16,23 @@ void vertex() {
 void fragment() {
 	vec2 p = wpos.xz;
 	if (mode == 0) {
+		// Pavés carrés aux angles arrondis, rangs décalés, joints étroits et terreux
 		float row = floor(p.y / cell);
-		vec2 q = vec2(p.x / cell + mod(row, 2.0) * 0.5, p.y / cell);
+		vec2 q = vec2(p.x / cell + hash12(vec2(row, 1.0)) * 0.7, p.y / cell);
 		vec2 id = floor(q);
 		vec2 f = fract(q) - 0.5;
 		float h = hash12(id);
-		float d = length(f * vec2(1.0, 1.15)) + h * 0.06;
-		float stone = 1.0 - smoothstep(0.36, 0.46, d);
-		vec3 c = color_a.rgb * (0.75 + 0.45 * h) * (0.9 + 0.2 * vnoise(p * 9.0));
-		c = mix(color_b.rgb, c, stone);
+		vec2 a = abs(f) - (0.36 + 0.06 * h);
+		float d = length(max(a, 0.0)) + min(max(a.x, a.y), 0.0);
+		float stone = 1.0 - smoothstep(-0.02, 0.06, d);
+		vec3 c = color_a.rgb * (0.8 + 0.35 * h) * (0.92 + 0.16 * vnoise(p * 11.0));
+		c *= 1.0 - smoothstep(-0.12, 0.04, d) * 0.18;            // bombé : bords plus sombres
+		vec3 joint = mix(color_b.rgb, vec3(0.3, 0.27, 0.2), 0.5);
+		c = mix(joint, c, stone);
 		c *= 0.85 + 0.25 * fbm(p * 0.15);
 		ALBEDO = c;
-		ROUGHNESS = mix(0.95, 0.7, stone);
-		AO = mix(0.5, 1.0, stone);
+		ROUGHNESS = mix(0.95, 0.75, stone);
+		AO = mix(0.65, 1.0, stone);
 	} else {
 		float n = fbm(p * 0.6);
 		vec3 c = mix(color_b.rgb, color_a.rgb, n);

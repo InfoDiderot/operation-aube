@@ -690,7 +690,8 @@ func _village() -> void:
 	house(Vector3(15, 0, -24), 8, 10, 5.5, "stone", C_ROOF, 0.6)
 	church(Vector3(0, 0, -36))
 	# Mobilier de la place
-	cyl(Vector3(-6, 0.45, -3), 1.0, 0.9, C_STONE2, 10)
+	cyl(Vector3(-6, 0.45, -3), 1.0, 0.9, Mats.stone(C_STONE2), 12)
+	cyl(Vector3(-6, 0.93, -3), 1.08, 0.08, C_STONE2.darkened(0.15), 12, false)
 	cyl(Vector3(-6, 1.6, -3.9), 0.06, 2.2, C_WOOD, 5, false)
 	cyl(Vector3(-6, 1.6, -2.1), 0.06, 2.2, C_WOOD, 5, false)
 	box(Vector3(-6, 2.8, -3), Vector3(1.4, 0.15, 2.2), C_ROOF, 0.0, false)

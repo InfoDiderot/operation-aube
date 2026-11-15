@@ -35,7 +35,8 @@ static func roof(tile: Color, gable: Color, slate := false) -> ShaderMaterial:
 
 
 static func cobble() -> ShaderMaterial:
-	return _shader_mat("res://shaders/cobble.gdshader", {"mode": 0})
+	return _shader_mat("res://shaders/cobble.gdshader", {"mode": 0, "cell": 0.32,
+		"color_a": Color(0.5, 0.47, 0.42), "color_b": Color(0.36, 0.33, 0.28)})
 
 
 static func dirt_road() -> ShaderMaterial:

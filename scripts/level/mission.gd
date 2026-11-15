@@ -110,9 +110,9 @@ func _setup_environment() -> void:
 	env.fog_height = 2.0
 	env.fog_height_density = 0.03
 	env.volumetric_fog_enabled = high
-	env.volumetric_fog_density = 0.012
+	env.volumetric_fog_density = 0.0065
 	env.volumetric_fog_albedo = Color(0.92, 0.85, 0.78)
-	env.volumetric_fog_anisotropy = 0.65
+	env.volumetric_fog_anisotropy = 0.5
 	env.volumetric_fog_length = 90.0
 	env.volumetric_fog_ambient_inject = 0.25
 	env.adjustment_enabled = true
@@ -126,7 +126,7 @@ func _setup_environment() -> void:
 	sun.rotation_degrees = Vector3(-17, 72, 0)
 	sun.light_color = Color(1.0, 0.8, 0.6)
 	sun.light_energy = 1.6
-	sun.light_volumetric_fog_energy = 1.6
+	sun.light_volumetric_fog_energy = 1.1
 	sun.shadow_enabled = true
 	sun.shadow_blur = 1.2
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS

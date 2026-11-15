@@ -1,7 +1,9 @@
 class_name LevelBuilder
 extends RefCounted
-## Construit procéduralement le village normand (low-poly) : sol, routes, haies du bocage,
+## Construit procéduralement le village normand (stylisé) : sol, routes, haies du bocage,
 ## maisons, église, place, site du canon de 88, point de ralliement, couvertures et navmesh.
+## Matériaux procéduraux (Mats) ; végétation Quaternius en MultiMesh (Nature).
+## Une grille d'occupation (1 m) empêche l'herbe de pousser dans les murs et sur les routes.
 ## Le nord est vers -Z. Zone jouable : x ∈ [-70, 70], z ∈ [-90, 110].
 
 const C_GRASS_A := Color(0.33, 0.45, 0.2)
@@ -32,6 +34,11 @@ var flak: Node3D
 var flak_barrel: Node3D
 var _mats: Dictionary = {}
 var rng := RandomNumberGenerator.new()
+var nature := Nature.new()
+var _blocked: Dictionary = {}     # Vector2i (cellule de 1 m) -> true
+const C_FRAME := Color(0.82, 0.79, 0.72)
+const C_GLASS := Color(0.12, 0.14, 0.16)
+const TREES := ["NormalTree_1", "NormalTree_2", "NormalTree_3", "NormalTree_4", "NormalTree_5"]
 
 
 func build(parent: Node3D) -> void:
@@ -57,6 +64,8 @@ func build(parent: Node3D) -> void:
 	_rally_site()
 	_north_fields()
 	_bounds()
+	_ground_cover()
+	nature.flush(root, 70.0 if Game.quality > 0 else 45.0)
 	nav.bake_navigation_mesh(false)
 
 
@@ -102,12 +111,42 @@ func _shape(body: Node3D, shape: Shape3D, pos := Vector3.ZERO, rot := Vector3.ZE
 	cs.position = pos
 	cs.rotation = rot
 	body.add_child(cs)
+	if shape is BoxShape3D:
+		var sz := (shape as BoxShape3D).size
+		if sz.x < 100.0 and sz.z < 100.0 and sz.y > 0.3:
+			_mark_rect(cs.global_transform, sz)
+	elif shape is CylinderShape3D:
+		var o := cs.global_position
+		_mark_disc(Vector2(o.x, o.z), (shape as CylinderShape3D).radius + 0.3)
 
 
-func mesh(m: Mesh, pos: Vector3, c: Color, rot_deg := Vector3.ZERO, parent: Node3D = null) -> MeshInstance3D:
+func _mark_rect(xf: Transform3D, size: Vector3) -> void:
+	var inv := xf.affine_inverse()
+	var r := Vector2(size.x, size.z).length() * 0.5 + 0.5
+	var o := xf.origin
+	for x in range(floori(o.x - r), ceili(o.x + r) + 1):
+		for z in range(floori(o.z - r), ceili(o.z + r) + 1):
+			var lp := inv * Vector3(x + 0.5, o.y, z + 0.5)
+			if absf(lp.x) < size.x * 0.5 + 0.4 and absf(lp.z) < size.z * 0.5 + 0.4:
+				_blocked[Vector2i(x, z)] = true
+
+
+func _mark_disc(c: Vector2, r: float) -> void:
+	for x in range(floori(c.x - r), ceili(c.x + r) + 1):
+		for z in range(floori(c.y - r), ceili(c.y + r) + 1):
+			if Vector2(x + 0.5, z + 0.5).distance_to(c) < r:
+				_blocked[Vector2i(x, z)] = true
+
+
+func is_blocked(p: Vector3) -> bool:
+	return _blocked.has(Vector2i(floori(p.x), floori(p.z)))
+
+
+## `c` : une Color (matériau uni) ou un Material (procédural).
+func mesh(m: Mesh, pos: Vector3, c: Variant, rot_deg := Vector3.ZERO, parent: Node3D = null) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = m
-	mi.material_override = mat(c)
+	mi.material_override = c if c is Material else mat(c)
 	mi.position = pos
 	mi.rotation_degrees = rot_deg
 	(parent if parent else nav).add_child(mi)
@@ -121,7 +160,7 @@ func boxm(size: Vector3) -> BoxMesh:
 
 
 ## Bloc avec collision optionnelle.
-func box(pos: Vector3, size: Vector3, c: Color, rot_y := 0.0, collide := true, parent: Node3D = null) -> Node3D:
+func box(pos: Vector3, size: Vector3, c: Variant, rot_y := 0.0, collide := true, parent: Node3D = null) -> Node3D:
 	if not collide:
 		return mesh(boxm(size), pos, c, Vector3(0, rot_y, 0), parent)
 	var body := _static(pos, rot_y, parent)
@@ -132,7 +171,7 @@ func box(pos: Vector3, size: Vector3, c: Color, rot_y := 0.0, collide := true, p
 	return body
 
 
-func cyl(pos: Vector3, radius: float, height: float, c: Color, sides := 8, collide := true, top_radius := -1.0) -> Node3D:
+func cyl(pos: Vector3, radius: float, height: float, c: Variant, sides := 8, collide := true, top_radius := -1.0) -> Node3D:
 	var cm := CylinderMesh.new()
 	cm.top_radius = radius if top_radius < 0.0 else top_radius
 	cm.bottom_radius = radius
@@ -176,35 +215,19 @@ func _ground() -> void:
 	_shape(body, s)
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(400, 400)
-	var gm := StandardMaterial3D.new()
-	var noise := FastNoiseLite.new()
-	noise.frequency = 0.02
-	noise.seed = 7
-	var tex := NoiseTexture2D.new()
-	tex.noise = noise
-	tex.seamless = true
-	tex.width = 256
-	tex.height = 256
-	var grad := Gradient.new()
-	grad.set_color(0, C_GRASS_A)
-	grad.set_color(1, C_GRASS_B)
-	tex.color_ramp = grad
-	gm.albedo_texture = tex
-	gm.uv1_scale = Vector3(12, 12, 1)
-	gm.roughness = 1.0
 	var gi := MeshInstance3D.new()
 	gi.mesh = pm
-	gi.material_override = gm
+	gi.material_override = Mats.ground()
 	gi.position = Vector3(0, 0.5, 0)
 	body.add_child(gi)
 	# Route principale (sud -> place), place pavée, ruelles est/ouest
-	box(Vector3(0, 0.012, 47.5), Vector3(6, 0.02, 125), C_ROAD, 0.0, false)
-	box(Vector3(-1.6, 0.016, 47.5), Vector3(0.5, 0.02, 125), C_ROAD.darkened(0.15), 0.0, false)
-	box(Vector3(1.6, 0.016, 47.5), Vector3(0.5, 0.02, 125), C_ROAD.darkened(0.15), 0.0, false)
-	box(Vector3(0, 0.014, -2), Vector3(40, 0.02, 26), C_COBBLE, 0.0, false)
-	box(Vector3(0, 0.014, -17), Vector3(14, 0.02, 4), C_COBBLE, 0.0, false)
-	box(Vector3(38, 0.013, -2), Vector3(36, 0.02, 5), C_ROAD, 0.0, false)
-	box(Vector3(-40, 0.013, -2), Vector3(40, 0.02, 5), C_ROAD, 0.0, false)
+	box(Vector3(0, 0.012, 47.5), Vector3(6, 0.02, 125), Mats.dirt_road(), 0.0, false)
+	box(Vector3(-1.6, 0.016, 47.5), Vector3(0.45, 0.02, 125), Color(0.3, 0.25, 0.19), 0.0, false)
+	box(Vector3(1.6, 0.016, 47.5), Vector3(0.45, 0.02, 125), Color(0.3, 0.25, 0.19), 0.0, false)
+	box(Vector3(0, 0.014, -2), Vector3(40, 0.02, 26), Mats.cobble(), 0.0, false)
+	box(Vector3(0, 0.014, -17), Vector3(14, 0.02, 4), Mats.cobble(), 0.0, false)
+	box(Vector3(38, 0.013, -2), Vector3(36, 0.02, 5), Mats.dirt_road(), 0.0, false)
+	box(Vector3(-40, 0.013, -2), Vector3(40, 0.02, 5), Mats.dirt_road(), 0.0, false)
 	# Poteaux télégraphiques le long de la route
 	for z in range(100, 40, -20):
 		cyl(Vector3(4.2, 3.5, z), 0.1, 7.0, C_WOOD, 5, false)
@@ -231,33 +254,38 @@ func hedge(a: Vector3, b: Vector3, gaps: Array = [], h := 2.4) -> void:
 		if s1 - s0 < 0.5:
 			continue
 		var mid := a + dir * (s0 + s1) * 0.5
-		box(mid + Vector3.UP * h * 0.5, Vector3(1.6, h, s1 - s0), _vary(C_HEDGE, 0.03), yaw)
-		var n := maxi(1, int((s1 - s0) / 2.6))
-		for k in n:
-			var p := a + dir * (s0 + (k + 0.5) * (s1 - s0) / n)
-			blob(p + Vector3.UP * (h + rng.randf_range(-0.3, 0.2)), rng.randf_range(1.0, 1.5),
-				rng.randf_range(1.4, 2.2), _vary(C_LEAF if k % 2 == 0 else C_LEAF2, 0.04))
+		# Noyau (collision + masque de vue), recouvert de buissons
+		box(mid + Vector3.UP * (h - 0.3) * 0.5, Vector3(1.3, h - 0.3, s1 - s0), Color(0.12, 0.2, 0.07), yaw)
+		var t := s0 + 0.6
+		var k := 0
+		while t < s1 - 0.4:
+			var p := a + dir * t
+			for sd: float in [-0.35, 0.35]:
+				var bp := p + side * (sd + rng.randf_range(-0.15, 0.15))
+				var kind := "Bush_Large" if rng.randf() < 0.85 else "Bush_Large_Flowers"
+				nature.add_at(kind, bp, rng.randf_range(1.75, 2.15), rng.randf() * TAU)
+			if rng.randf() < 0.35:
+				nature.add_at("Plant_%d" % (1 + rng.randi() % 2), p + side * rng.randf_range(-1.1, 1.1),
+					rng.randf_range(0.9, 1.3), rng.randf() * TAU)
 			if k % 3 == 1:
 				cover(p + side * 1.4)
 				cover(p - side * 1.4)
+			t += 1.5
+			k += 1
 		if rng.randf() < 0.5:
 			tree(a + dir * rng.randf_range(s0, s1), rng.randf_range(0.9, 1.3))
 
 
-func tree(pos: Vector3, s := 1.0) -> void:
-	var body := _static(pos + Vector3.UP * 1.6 * s)
+## Arbre Quaternius ; seul le tronc a une collision (balles et regards passent dans le feuillage).
+func tree(pos: Vector3, s := 1.0, kind := "") -> void:
+	if kind == "":
+		kind = TREES[rng.randi() % TREES.size()]
+	nature.add_at(kind, pos, s * rng.randf_range(0.95, 1.15), rng.randf() * TAU)
+	var body := _static(pos + Vector3.UP * 1.5 * s)
 	var cs := CylinderShape3D.new()
-	cs.radius = 0.25 * s
-	cs.height = 3.2 * s
+	cs.radius = 0.3 * s
+	cs.height = 3.0 * s
 	_shape(body, cs)
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.16 * s
-	cm.bottom_radius = 0.26 * s
-	cm.height = 3.2 * s
-	cm.radial_segments = 6
-	mesh(cm, Vector3.ZERO, C_WOOD.darkened(0.2), Vector3.ZERO, body)
-	blob(pos + Vector3.UP * 4.2 * s, 2.3 * s, 3.6 * s, _vary(C_LEAF, 0.05))
-	blob(pos + Vector3(0.8, 5.3, 0.4) * s, 1.4 * s, 2.2 * s, _vary(C_LEAF2, 0.05))
 
 
 func _bocage() -> void:
@@ -322,44 +350,119 @@ func _wreck(pos: Vector3, rot: float, c: Color) -> void:
 
 # --- Village ---------------------------------------------------------------------
 
-func house(center: Vector3, w: float, d: float, h: float, style := "stone", roof_c := C_ROOF) -> void:
+## Maison : murs en moellons ou colombages enduits, couverture en tuiles/ardoises,
+## fenêtres à encadrement et croisillons, appuis, volets, bacs à fleurs, porte, cheminée.
+## `damage` > 0 : toit éventré et façades noircies.
+func house(center: Vector3, w: float, d: float, h: float, style := "stone", roof_c := C_ROOF, damage := 0.0) -> void:
 	var hold := Node3D.new()
 	hold.position = center
 	nav.add_child(hold)
-	var wall_c := C_PLASTER if style == "colombage" else _vary(C_STONE, 0.05)
-	box(Vector3(0, h * 0.5, 0), Vector3(w, h, d), wall_c, 0.0, true, hold)
+	var colombage := style == "colombage"
+	var wall_c := C_PLASTER if colombage else _vary(C_STONE, 0.05)
+	var wall_mat: Material = Mats.plaster(wall_c, damage * 0.7) if colombage else Mats.stone(wall_c, damage * 0.7)
+	box(Vector3(0, h * 0.5, 0), Vector3(w, h, d), wall_mat, 0.0, true, hold)
+	# Soubassement en pierre plus sombre
+	box(Vector3(0, 0.3, 0), Vector3(w + 0.08, 0.6, d + 0.08), Mats.stone(C_STONE2.darkened(0.1)), 0.0, false, hold)
 	var roof := PrismMesh.new()
 	roof.size = Vector3(w + 0.8, h * 0.6, d + 0.6)
-	mesh(roof, Vector3(0, h + h * 0.3, 0), roof_c, Vector3.ZERO, hold)
-	box(Vector3(w * 0.22, h + h * 0.45, d * 0.3), Vector3(0.7, h * 0.5, 0.7), C_STONE2, 0.0, false, hold)
+	var slate := roof_c == C_SLATE
+	mesh(roof, Vector3(0, h + h * 0.3, 0), Mats.roof(roof_c, wall_c, slate), Vector3.ZERO, hold)
+	# Rives de toit (planches de bord)
+	for sz: float in [-1.0, 1.0]:
+		var half := (w + 0.8) * 0.5
+		var ang := rad_to_deg(atan2(h * 0.6, half))
+		for sx: float in [-1.0, 1.0]:
+			box(Vector3(sx * half * 0.5, h + h * 0.3, sz * (d * 0.5 + 0.31)), Vector3(half * 1.12, 0.12, 0.08),
+				C_WOOD.darkened(0.3), 0.0, false, hold).rotation_degrees = Vector3(0, 0, -sx * ang)
+	box(Vector3(w * 0.22, h + h * 0.45, d * 0.3), Vector3(0.7, h * 0.5, 0.7), Mats.stone(C_STONE2), 0.0, false, hold)
+	box(Vector3(w * 0.22, h + h * 0.72, d * 0.3), Vector3(0.85, 0.12, 0.85), C_STONE2.darkened(0.2), 0.0, false, hold)
 	var shutter: Color = SHUTTERS[rng.randi() % SHUTTERS.size()]
 	var floors := [1.6, 3.9] if h > 5.0 else [1.6]
 	var door_side := -signf(center.x) if absf(center.x) > 1.0 else 1.0
 	for sx: float in [-1.0, 1.0]:
-		var x := sx * (w * 0.5 + 0.03)
+		var x := sx * (w * 0.5)
 		var n := maxi(1, int(d / 3.2))
+		if colombage:
+			var nb := int(d / 1.4)
+			for i in nb + 1:
+				box(Vector3(x + sx * 0.04, h * 0.5, -d * 0.5 + i * d / nb), Vector3(0.08, h, 0.16), C_BEAM, 0.0, false, hold)
+			for y: float in [0.65, h * 0.5, h - 0.1]:
+				box(Vector3(x + sx * 0.04, y, 0), Vector3(0.08, 0.16, d), C_BEAM, 0.0, false, hold)
+			# Croix de Saint-André entre les poteaux d'angle
+			for zz: float in [-d * 0.5 + d / nb * 0.5, d * 0.5 - d / nb * 0.5]:
+				for diag: float in [-1.0, 1.0]:
+					var brace := box(Vector3(x + sx * 0.045, h * 0.75, zz), Vector3(0.07, h * 0.62, 0.12), C_BEAM, 0.0, false, hold)
+					brace.rotation_degrees.x = diag * 32.0
 		for i in n:
 			var z := -d * 0.5 + (i + 0.5) * d / n
 			for fy: float in floors:
 				if fy < 2.0 and sx == door_side and i == n / 2:
-					box(Vector3(x, 1.1, z), Vector3(0.1, 2.2, 1.1), C_WOOD.darkened(0.2), 0.0, false, hold)
+					_door(hold, Vector3(x, 0, z), sx)
 					continue
-				box(Vector3(x, fy, z), Vector3(0.1, 1.0, 0.8), C_DARK, 0.0, false, hold)
-				box(Vector3(x + sx * 0.02, fy, z - 0.62), Vector3(0.1, 1.0, 0.4), shutter, 0.0, false, hold)
-				box(Vector3(x + sx * 0.02, fy, z + 0.62), Vector3(0.1, 1.0, 0.4), shutter, 0.0, false, hold)
-		if style == "colombage":
-			var nb := int(d / 1.4)
-			for i in nb + 1:
-				box(Vector3(x, h * 0.5, -d * 0.5 + i * d / nb), Vector3(0.08, h, 0.16), C_BEAM, 0.0, false, hold)
-			for y: float in [0.25, h * 0.5, h - 0.1]:
-				box(Vector3(x, y, 0), Vector3(0.08, 0.16, d), C_BEAM, 0.0, false, hold)
+				_window(hold, Vector3(x, fy, z), sx, shutter, fy > 2.0 and rng.randf() < 0.5)
 	for sz: float in [-1.0, 1.0]:
 		for fy: float in floors:
-			box(Vector3(0, fy, sz * (d * 0.5 + 0.03)), Vector3(0.8, 1.0, 0.1), C_DARK, 0.0, false, hold)
+			_window_z(hold, Vector3(0, fy, sz * d * 0.5), sz)
+	if damage > 0.0:
+		_roof_hole(hold, w, d, h)
+	# Végétation au pied des murs (côté cour)
+	for i in 3:
+		var side := -door_side
+		var p := center + Vector3(side * (w * 0.5 + 0.7), 0, rng.randf_range(-d * 0.4, d * 0.4))
+		nature.add_at("Bush_Small_Flowers" if rng.randf() < 0.5 else "Bush_Small", p, rng.randf_range(1.0, 1.5), rng.randf() * TAU)
 	# Couvertures aux angles
 	for cx: float in [-1.0, 1.0]:
 		for cz: float in [-1.0, 1.0]:
 			cover(center + Vector3(cx * (w * 0.5 + 0.9), 0, cz * (d * 0.5 - 0.5)))
+
+
+## Fenêtre sur une façade ±X : encadrement, vitre sombre, croisillons, appui, volets ouverts.
+func _window(hold: Node3D, p: Vector3, sx: float, shutter: Color, flower_box: bool) -> void:
+	var x := p.x
+	box(Vector3(x + sx * 0.03, p.y, p.z), Vector3(0.06, 1.12, 0.92), C_FRAME, 0.0, false, hold)
+	box(Vector3(x + sx * 0.05, p.y, p.z), Vector3(0.04, 0.96, 0.76), C_GLASS, 0.0, false, hold)
+	box(Vector3(x + sx * 0.075, p.y, p.z), Vector3(0.03, 0.96, 0.05), C_FRAME, 0.0, false, hold)
+	box(Vector3(x + sx * 0.075, p.y + 0.1, p.z), Vector3(0.03, 0.05, 0.76), C_FRAME, 0.0, false, hold)
+	box(Vector3(x + sx * 0.09, p.y - 0.6, p.z), Vector3(0.18, 0.08, 1.04), C_STONE2.lightened(0.1), 0.0, false, hold)
+	box(Vector3(x + sx * 0.07, p.y + 0.62, p.z), Vector3(0.12, 0.12, 1.1), C_STONE2, 0.0, false, hold)
+	for sz: float in [-1.0, 1.0]:
+		var sh := box(Vector3(x + sx * 0.08, p.y, p.z + sz * 0.68), Vector3(0.05, 1.04, 0.42), shutter, 0.0, false, hold)
+		sh.rotation_degrees.y = sz * sx * -12.0
+	if flower_box:
+		box(Vector3(x + sx * 0.2, p.y - 0.7, p.z), Vector3(0.24, 0.2, 0.86), C_WOOD, 0.0, false, hold)
+		nature.add_at("Flower_%d_Clump" % (1 + rng.randi() % 4), hold.global_position + Vector3(x + sx * 0.2, p.y - 0.6, p.z),
+			1.4, rng.randf() * TAU)
+
+
+## Petite fenêtre de pignon (façade ±Z).
+func _window_z(hold: Node3D, p: Vector3, sz: float) -> void:
+	box(Vector3(p.x, p.y, p.z + sz * 0.03), Vector3(0.84, 1.04, 0.06), C_FRAME, 0.0, false, hold)
+	box(Vector3(p.x, p.y, p.z + sz * 0.05), Vector3(0.68, 0.88, 0.04), C_GLASS, 0.0, false, hold)
+	box(Vector3(p.x, p.y, p.z + sz * 0.075), Vector3(0.05, 0.88, 0.03), C_FRAME, 0.0, false, hold)
+	box(Vector3(p.x, p.y - 0.55, p.z + sz * 0.09), Vector3(0.96, 0.08, 0.18), C_STONE2.lightened(0.1), 0.0, false, hold)
+
+
+func _door(hold: Node3D, p: Vector3, sx: float) -> void:
+	box(Vector3(p.x + sx * 0.03, 1.15, p.z), Vector3(0.06, 2.4, 1.36), C_STONE2.lightened(0.05), 0.0, false, hold)
+	box(Vector3(p.x + sx * 0.05, 1.08, p.z), Vector3(0.05, 2.16, 1.06), C_WOOD.darkened(0.25), 0.0, false, hold)
+	for k in 4:
+		box(Vector3(p.x + sx * 0.08, 1.08, p.z - 0.4 + k * 0.27), Vector3(0.02, 2.1, 0.03), C_WOOD.darkened(0.45), 0.0, false, hold)
+	box(Vector3(p.x + sx * 0.25, 0.06, p.z), Vector3(0.5, 0.12, 1.5), C_STONE2, 0.0, false, hold)
+
+
+## Toit éventré par un obus : trou sombre et chevrons calcinés sur un versant.
+func _roof_hole(hold: Node3D, w: float, d: float, h: float) -> void:
+	var half := (w + 0.8) * 0.5
+	var rh := h * 0.6
+	var ang := atan2(rh, half)
+	var n := Vector3(rh, half, 0).normalized()      # normale du versant +X
+	var c := Vector3(half * 0.5, h + rh * 0.5, rng.randf_range(-d * 0.2, d * 0.2)) + n * 0.03
+	var hole := box(c, Vector3(half * 0.7, 0.04, 2.6), Color(0.05, 0.04, 0.04), 0.0, false, hold)
+	hole.rotation = Vector3(0, 0, -ang)
+	for k in 4:
+		var raf := box(c + n * 0.06 + Vector3(0, 0, -1.0 + k * 0.66), Vector3(half * 0.9, 0.12, 0.12),
+			C_BURNT, 0.0, false, hold)
+		raf.rotation = Vector3(0, 0, -ang + rng.randf_range(-0.1, 0.1))
 
 
 ## Maison en ruine, ouverte côté est : murs déchiquetés, gravats, fumée.
@@ -371,15 +474,17 @@ func ruin(center: Vector3, w: float, d: float, h: float) -> void:
 	_jagged_wall(center + Vector3(0, 0, -d * 0.5), w, h, 0.0, [[w * 0.55, w * 0.75]])
 	_jagged_wall(center + Vector3(0, 0, d * 0.5), w, h * 0.8, 0.0, [[w * 0.3, w * 0.48]])
 	# Côté est : muret effondré (couverture)
-	box(center + Vector3(w * 0.5, 0.5, -d * 0.3), Vector3(t, 1.0, d * 0.35), C_STONE2)
-	box(center + Vector3(w * 0.5, 0.45, d * 0.32), Vector3(t, 0.9, d * 0.3), C_STONE2)
+	box(center + Vector3(w * 0.5, 0.5, -d * 0.3), Vector3(t, 1.0, d * 0.35), Mats.stone(C_STONE2, 0.3))
+	box(center + Vector3(w * 0.5, 0.45, d * 0.32), Vector3(t, 0.9, d * 0.3), Mats.stone(C_STONE2, 0.3))
 	cover(center + Vector3(w * 0.5 - 0.9, 0, -d * 0.3))
 	cover(center + Vector3(w * 0.5 - 0.9, 0, d * 0.32))
 	# Gravats et poutres calcinées
 	for i in 7:
 		var p := center + Vector3(rng.randf_range(-w * 0.35, w * 0.35), 0.2, rng.randf_range(-d * 0.35, d * 0.35))
-		box(p, Vector3(rng.randf_range(0.4, 1.0), 0.4, rng.randf_range(0.4, 1.0)), C_STONE2.darkened(0.1),
+		box(p, Vector3(rng.randf_range(0.4, 1.0), 0.4, rng.randf_range(0.4, 1.0)), Mats.stone(C_STONE2, 0.4),
 			rng.randf_range(0, 90), false)
+		nature.add_at("Rock_%d" % (1 + rng.randi() % 5), p + Vector3(rng.randf_range(-0.8, 0.8), -0.2, 0.5),
+			rng.randf_range(0.5, 0.9), rng.randf() * TAU)
 	for i in 3:
 		var p := center + Vector3(rng.randf_range(-w * 0.3, w * 0.3), 0.3, rng.randf_range(-d * 0.3, d * 0.3))
 		mesh(boxm(Vector3(0.2, 0.2, 4.0)), p, C_BURNT, Vector3(rng.randf_range(-15, 15), rng.randf_range(0, 180), 0))
@@ -399,30 +504,46 @@ func _jagged_wall(center: Vector3, length: float, h: float, rot: float, gaps: Ar
 				in_gap = true
 		if not in_gap:
 			var sh := h * rng.randf_range(0.45, 1.0)
-			box(start + dir * mid_s + Vector3.UP * sh * 0.5, Vector3(seg, sh, 0.5), _vary(C_STONE, 0.04), rot)
+			box(start + dir * mid_s + Vector3.UP * sh * 0.5, Vector3(seg, sh, 0.5), Mats.stone(C_STONE, 0.55), rot)
 		s += seg
 
 
 func church(center: Vector3) -> void:
 	# Nef
-	box(center + Vector3(0, 4.5, 0), Vector3(12, 9, 22), C_STONE2)
+	var stone2 := Mats.stone(C_STONE2)
+	box(center + Vector3(0, 4.5, 0), Vector3(12, 9, 22), stone2)
 	var roof := PrismMesh.new()
 	roof.size = Vector3(13, 5, 23)
-	mesh(roof, center + Vector3(0, 11.5, 0), C_SLATE)
+	mesh(roof, center + Vector3(0, 11.5, 0), Mats.roof(C_SLATE, C_STONE2, true))
 	for sx: float in [-1.0, 1.0]:
 		for i in 4:
-			box(center + Vector3(sx * 6.03, 4.5, -7.5 + i * 5.0), Vector3(0.1, 3.2, 1.0), C_DARK, 0.0, false)
+			var wz := -7.5 + i * 5.0
+			# Vitrail en lancette + encadrement, contreforts entre les baies
+			box(center + Vector3(sx * 6.02, 4.8, wz), Vector3(0.1, 3.6, 1.3), C_STONE.lightened(0.1), 0.0, false)
+			box(center + Vector3(sx * 6.06, 4.8, wz), Vector3(0.06, 3.3, 0.95), Color(0.22, 0.26, 0.38), 0.0, false)
+			box(center + Vector3(sx * 6.09, 4.8, wz), Vector3(0.03, 3.3, 0.06), C_DARK, 0.0, false)
+			cyl(center + Vector3(sx * 6.06, 6.45, wz), 0.47, 0.06, Color(0.22, 0.26, 0.38), 8, false).rotation_degrees.z = 90.0
+			box(center + Vector3(sx * 6.4, 2.5, wz + 2.5), Vector3(0.8, 5.0, 0.9), stone2, 0.0, true)
+			box(center + Vector3(sx * 6.25, 5.3, wz + 2.5), Vector3(0.5, 1.0, 0.9), stone2, 0.0, false).rotation_degrees.z = sx * 25.0
 	# Clocher (au sud, face à la place)
 	var tz := center.z + 14.0
-	box(Vector3(center.x, 9, tz), Vector3(6.5, 18, 6.5), C_STONE)
+	box(Vector3(center.x, 9, tz), Vector3(6.5, 18, 6.5), Mats.stone(C_STONE))
+	for y: float in [6.0, 12.0, 17.8]:
+		box(Vector3(center.x, y, tz), Vector3(6.8, 0.3, 6.8), C_STONE2, 0.0, false)
+	for sx2: float in [-1.0, 1.0]:
+		for sz2: float in [-1.0, 1.0]:
+			box(Vector3(center.x + sx2 * 3.15, 5.0, tz + sz2 * 3.15), Vector3(0.9, 10.0, 0.9), Mats.stone(C_STONE2), 0.0, false)
 	var spire := CylinderMesh.new()
 	spire.top_radius = 0.0
 	spire.bottom_radius = 4.7
 	spire.height = 8.0
 	spire.radial_segments = 4
 	spire.rings = 1
-	mesh(spire, Vector3(center.x, 22, tz), C_SLATE, Vector3(0, 45, 0))
-	box(Vector3(center.x, 1.6, tz + 3.27), Vector3(2.0, 3.2, 0.1), C_WOOD.darkened(0.3), 0.0, false)
+	mesh(spire, Vector3(center.x, 22, tz), Mats.roof(C_SLATE, C_SLATE, true), Vector3(0, 45, 0))
+	cyl(Vector3(center.x, 26.6, tz), 0.04, 1.4, C_DARK, 4, false)
+	box(Vector3(center.x, 26.9, tz), Vector3(0.6, 0.05, 0.05), C_DARK, 0.0, false)
+	box(Vector3(center.x, 1.8, tz + 3.27), Vector3(2.6, 3.8, 0.12), C_STONE.lightened(0.1), 0.0, false)
+	box(Vector3(center.x, 1.6, tz + 3.31), Vector3(2.0, 3.2, 0.1), C_WOOD.darkened(0.3), 0.0, false)
 	box(Vector3(center.x, 14.5, tz + 3.27), Vector3(1.2, 2.2, 0.1), C_DARK, 0.0, false)
 	cyl(Vector3(center.x, 11.0, tz + 3.3), 0.9, 0.06, Color(0.9, 0.88, 0.8), 12, false).rotation_degrees.x = 90.0
 	box(Vector3(center.x, 0.02, tz + 4.5), Vector3(8, 0.04, 2.5), C_COBBLE.lightened(0.1), 0.0, false)
@@ -531,8 +652,12 @@ func sandbag_line(a: Vector3, b: Vector3, layers := 3) -> void:
 func low_wall(a: Vector3, b: Vector3, h := 1.1) -> void:
 	var dir := b - a
 	var length := dir.length()
-	box((a + b) * 0.5 + Vector3.UP * h * 0.5, Vector3(0.5, h, length), C_STONE2,
-		rad_to_deg(atan2(dir.x, dir.z)))
+	var yaw := rad_to_deg(atan2(dir.x, dir.z))
+	box((a + b) * 0.5 + Vector3.UP * h * 0.5, Vector3(0.5, h, length), Mats.stone(C_STONE2), yaw)
+	box((a + b) * 0.5 + Vector3.UP * (h + 0.06), Vector3(0.62, 0.12, length + 0.1), C_STONE2.darkened(0.15), yaw, false)
+	for k in int(length / 2.5):
+		nature.add_at("Plant_%d" % (1 + rng.randi() % 2), a + dir * (k + 0.5) / int(length / 2.5)
+			+ Vector3(dir.z, 0, -dir.x).normalized() * 0.6 * (1.0 if k % 2 == 0 else -1.0), rng.randf_range(0.7, 1.0), rng.randf() * TAU)
 	var side := Vector3(dir.z, 0, -dir.x) / length
 	for k in maxi(1, int(length / 4.0)):
 		var p := a + dir * (k + 0.5) / maxi(1, int(length / 4.0))
@@ -548,7 +673,7 @@ func _village() -> void:
 	house(Vector3(-10, 0, 34), 8, 11, 6, "colombage")
 	house(Vector3(-10, 0, 20), 8, 10, 5.5)
 	house(Vector3(10, 0, 36), 8, 10, 6)
-	house(Vector3(10.5, 0, 22), 9, 11, 6.5, "colombage")
+	house(Vector3(10.5, 0, 22), 9, 11, 6.5, "colombage", C_ROOF, 1.0)
 	Fx.smoke_column(root, Vector3(10.5, 8.5, 22), Color(0.2, 0.2, 0.2), 1.3, true)
 	cart(Vector3(5.5, 0, 26), 10.0)
 	crates(Vector3(-5.5, 0, 30), 5.0)
@@ -558,7 +683,7 @@ func _village() -> void:
 	house(Vector3(25, 0, 6.5), 10, 11, 6.5, "colombage")
 	house(Vector3(25, 0, -10.5), 10, 9, 6)
 	house(Vector3(-15, 0, -24), 8, 10, 6, "colombage", C_SLATE)
-	house(Vector3(15, 0, -24), 8, 10, 5.5)
+	house(Vector3(15, 0, -24), 8, 10, 5.5, "stone", C_ROOF, 0.6)
 	church(Vector3(0, 0, -36))
 	# Mobilier de la place
 	cyl(Vector3(-6, 0.45, -3), 1.0, 0.9, C_STONE2, 10)
@@ -691,3 +816,38 @@ func _bounds() -> void:
 	# Fumées lointaines (ambiance)
 	for p: Vector3 in [Vector3(-110, 0, -70), Vector3(120, 0, 20), Vector3(60, 0, -140), Vector3(-90, 0, 90)]:
 		Fx.smoke_column(root, p, Color(0.25, 0.25, 0.25), 3.0, false)
+
+
+# --- Couvert végétal ------------------------------------------------------------------
+
+## Herbe, fleurs, plantes et rochers sur toutes les zones libres (hors routes et murs).
+## Densité selon la qualité graphique. Au pied des bâtiments : buissons et fleurs.
+func _ground_cover() -> void:
+	var density := 1.0 if Game.quality > 0 else 0.4
+	var step := 1.25
+	var z := -88.0
+	while z < 108.0:
+		var x := -68.0
+		while x < 68.0:
+			var p := Vector3(x + rng.randf_range(0.0, step), 0.0, z + rng.randf_range(0.0, step))
+			x += step
+			if rng.randf() > density or is_blocked(p) or is_paved(p):
+				continue
+			var village := absf(p.x) < 32.0 and p.z > -45.0 and p.z < 44.0
+			if village and rng.randf() < 0.65:
+				continue
+			var near_wall := is_blocked(p + Vector3(1.2, 0, 0)) or is_blocked(p - Vector3(1.2, 0, 0)) \
+				or is_blocked(p + Vector3(0, 0, 1.2)) or is_blocked(p - Vector3(0, 0, 1.2))
+			var r := rng.randf()
+			var yaw := rng.randf() * TAU
+			if near_wall and r < 0.25:
+				nature.add_at("Plant_%d" % (1 + rng.randi() % 2), p, rng.randf_range(0.8, 1.2), yaw)
+			elif r < 0.07:
+				nature.add_at("Flower_%d_Clump" % (1 + rng.randi() % 4), p, rng.randf_range(1.2, 1.8), yaw)
+			elif r < 0.085:
+				nature.add_at("Rock_%d" % (1 + rng.randi() % 5), p - Vector3(0, 0.15, 0), rng.randf_range(0.5, 1.2), yaw)
+			elif r < 0.095 and not village:
+				nature.add_at("Bush_Small", p, rng.randf_range(1.0, 1.6), yaw)
+			else:
+				nature.add_at("Grass_Large" if rng.randf() < 0.7 else "Grass_Small", p, rng.randf_range(1.1, 1.9), yaw)
+		z += step

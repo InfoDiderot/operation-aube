@@ -73,43 +73,73 @@ func _ready() -> void:
 		hud.banner("POINT DE CONTRÔLE", "Reprise de la mission", 3.0)
 
 
+## Aube rasante : ciel procédural nuageux, brume volumétrique (rayons de soleil en qualité haute),
+## occlusion ambiante, éclairage indirect en espace écran, étalonnage chaud.
 func _setup_environment() -> void:
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.3, 0.42, 0.62)
-	sky_mat.sky_horizon_color = Color(0.93, 0.68, 0.48)
-	sky_mat.ground_horizon_color = Color(0.62, 0.52, 0.42)
-	sky_mat.ground_bottom_color = Color(0.2, 0.19, 0.17)
-	sky_mat.sun_angle_max = 25.0
+	var high := Game.quality > 0
+	var sky_mat := ShaderMaterial.new()
+	sky_mat.shader = load("res://shaders/sky.gdshader") as Shader
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
+	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.8
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_exposure = 1.05
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.86, 0.72, 0.6)
-	env.fog_density = 0.006
-	env.fog_sky_affect = 0.25
+	env.ambient_light_energy = 0.75
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+	env.tonemap_mode = Environment.TONE_MAPPER_AGX
+	env.tonemap_exposure = 1.1
 	env.ssao_enabled = true
+	env.ssao_radius = 1.4
+	env.ssao_intensity = 1.6
+	env.ssil_enabled = high
+	env.ssil_intensity = 0.8
 	env.glow_enabled = true
-	env.glow_intensity = 0.4
+	env.glow_intensity = 0.5
+	env.glow_bloom = 0.08
+	env.glow_hdr_threshold = 1.1
+	# Brume de profondeur (tous rendus) + brume volumétrique (Forward+, qualité haute)
+	env.fog_enabled = true
+	env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+	env.fog_light_color = Color(0.88, 0.74, 0.62)
+	env.fog_density = 0.004 if high else 0.007
+	env.fog_sun_scatter = 0.35
+	env.fog_aerial_perspective = 0.4
+	env.fog_sky_affect = 0.2
+	env.fog_height = 2.0
+	env.fog_height_density = 0.03
+	env.volumetric_fog_enabled = high
+	env.volumetric_fog_density = 0.012
+	env.volumetric_fog_albedo = Color(0.92, 0.85, 0.78)
+	env.volumetric_fog_anisotropy = 0.65
+	env.volumetric_fog_length = 90.0
+	env.volumetric_fog_ambient_inject = 0.25
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 0.85
-	env.adjustment_contrast = 1.05
+	env.adjustment_saturation = 0.95
+	env.adjustment_contrast = 1.06
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
-	# Soleil bas à l'est : lumière d'aube rasante
+	# Soleil bas à l'est : ombres longues, rayons dans la brume
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-24, 68, 0)
-	sun.light_color = Color(1.0, 0.82, 0.62)
-	sun.light_energy = 1.2
+	sun.rotation_degrees = Vector3(-17, 72, 0)
+	sun.light_color = Color(1.0, 0.8, 0.6)
+	sun.light_energy = 1.6
+	sun.light_volumetric_fog_energy = 1.6
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 140.0
+	sun.shadow_blur = 1.2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_blend_splits = true
+	sun.directional_shadow_max_distance = 160.0 if high else 90.0
 	add_child(sun)
+	# Lumière de ciel, froide, du côté opposé : modelé des ombres
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-50, -110, 0)
+	fill.light_color = Color(0.55, 0.65, 0.85)
+	fill.light_energy = 0.18
+	fill.light_volumetric_fog_energy = 0.0
+	add_child(fill)
 
 
 # --- Unités ------------------------------------------------------------------------

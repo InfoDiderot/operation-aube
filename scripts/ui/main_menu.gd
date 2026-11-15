@@ -62,6 +62,17 @@ func _ready() -> void:
 	diff_row.add_child(diff)
 	diff_row.custom_minimum_size = Vector2(420, 0)
 	left.add_child(diff_row)
+	var q_row := HBoxContainer.new()
+	q_row.add_child(UiStyle.label("Qualité graphique", 18, UiStyle.MUTED))
+	var q := OptionButton.new()
+	q.add_item("Basse (PC modeste)", 0)
+	q.add_item("Haute (brume volumétrique, herbe dense)", 1)
+	q.selected = Game.quality
+	q.item_selected.connect(func(i: int) -> void: Game.quality = i)
+	q.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	q_row.add_child(q)
+	q_row.custom_minimum_size = Vector2(420, 0)
+	left.add_child(q_row)
 	var sens := UiStyle.sensitivity_row()
 	sens.custom_minimum_size = Vector2(420, 0)
 	left.add_child(sens)

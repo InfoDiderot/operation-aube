@@ -1,0 +1,2 @@
+Quaternius — Ultimate Stylized Nature Pack (CC0 1.0, domaine public), quaternius.com
+Portage Godot : walterpalladino/godot-quaternius-ultimate-stylized-nature (MIT, voir LICENSE-repo-MIT.txt)

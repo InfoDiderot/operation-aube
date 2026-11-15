@@ -17,6 +17,7 @@ const LAYER_ALLY := 16
 var difficulty := 1
 var mouse_sensitivity := 0.0022  # radians par pixel
 var invert_y := false
+var quality := 1            # 0 = basse (sans brume volumétrique, herbe réduite), 1 = haute
 var stats: Dictionary = {}
 var checkpoint := 0         # 0 = début ; 1 = village ; 2 = place prise ; 3 = canon détruit
 var last_result: Dictionary = {}

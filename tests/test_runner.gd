@@ -11,9 +11,29 @@ var mission: Node3D
 
 
 var _flow_done := false
+var _errors := ErrorCounter.new()
+
+
+## Compte les erreurs de script/moteur : une erreur pendant les tests = échec,
+## même si les assertions passent (une fonction interrompue peut ne rien casser de visible).
+class ErrorCounter extends Logger:
+	var count := 0
+	var first := ""
+	func _log_error(function: String, file: String, line: int, code: String, rationale: String,
+			_editor_notify: bool, error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
+		if error_type == ERROR_TYPE_WARNING:
+			return
+		if code.begins_with("ÉCHEC") or rationale.begins_with("ÉCHEC"):
+			return
+		count += 1
+		if first == "":
+			first = "%s %s (%s:%d)" % [code, rationale, file.get_file(), line]
+	func _log_message(_message: String, _error: bool) -> void:
+		pass
 
 
 func _ready() -> void:
+	OS.add_logger(_errors)
 	await get_tree().process_frame
 	test_weapon_table()
 	test_sounds()
@@ -24,6 +44,7 @@ func _ready() -> void:
 	_flow_done = false
 	await test_checkpoint_and_squad()
 	check(_flow_done, "test point de contrôle + escouade exécuté jusqu'au bout")
+	check(_errors.count == 0, "aucune erreur de script ou du moteur (%d ; première : %s)" % [_errors.count, _errors.first])
 	print("\nRésultat : %d réussis, %d échoués" % [passed, failed])
 	get_tree().quit(1 if failed > 0 else 0)
 
